@@ -421,4 +421,4 @@ if __name__ == "__main__":
     logger.info("Starting bot client...")
     app.run()
 
-esme FSUB_ID WALA SYSTEM REMOVE KROR
+#esme FSUB_ID WALA SYSTEM REMOVE KROR
