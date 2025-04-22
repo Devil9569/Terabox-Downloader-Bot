@@ -95,15 +95,42 @@ VALID_DOMAINS = [
 ]
 last_update_time = 0
 
+# Global dictionary to track user verification status
+user_verification_cache = {}
+
 async def is_user_member(client, user_id):
+    # Check if we have a cached result
+    if user_id in user_verification_cache:
+        cached_time, is_member = user_verification_cache[user_id]
+        # Cache for 5 minutes (300 seconds)
+        if time.time() - cached_time < 300:
+            logger.info(f"Using cached membership status for user {user_id}: {is_member}")
+            return is_member
+
     try:
-        member = await client.get_chat_member(FSUB_ID, user_id)
-        if member.status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]:
-            return True
+        # Debug logging to check the FSUB_ID value
+        logger.info(f"Checking membership for user {user_id} in chat {FSUB_ID}")
+        
+        member = await client.get_chat_member(chat_id=FSUB_ID, user_id=user_id)
+        
+        # Debug logging to see the member status
+        logger.info(f"Member status for user {user_id}: {member.status}")
+        
+        is_member = member.status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]
+        
+        # Cache the result
+        user_verification_cache[user_id] = (time.time(), is_member)
+        
+        if is_member:
+            logger.info(f"User {user_id} is a member. Status: {member.status}")
         else:
-            return False
+            logger.info(f"User {user_id} is NOT a member. Status: {member.status}")
+        
+        return is_member
     except Exception as e:
-        logging.error(f"Error checking membership status for user {user_id}: {e}")
+        # More specific error logging
+        logger.error(f"Error checking membership status for user {user_id} in chat {FSUB_ID}: {str(e)}")
+        # Don't cache errors
         return False
     
 def is_valid_url(url):
@@ -119,6 +146,28 @@ def format_size(size):
         return f"{size / (1024 * 1024):.2f} MB"
     else:
         return f"{size / (1024 * 1024 * 1024):.2f} GB"
+
+async def check_fsub_validity():
+    try:
+        # Get chat info
+        chat = await app.get_chat(FSUB_ID)
+        logger.info(f"Force subscription channel verified: {chat.title} ({FSUB_ID})")
+        
+        # Check if bot is admin or at least a member
+        me = await app.get_me()
+        bot_member = await app.get_chat_member(FSUB_ID, me.id)
+        
+        if bot_member.status == ChatMemberStatus.ADMINISTRATOR:
+            logger.info(f"Bot is an admin in the force subscription channel.")
+        elif bot_member.status == ChatMemberStatus.MEMBER:
+            logger.warning(f"Bot is a member but not an admin in the force subscription channel. This may cause permission issues.")
+        else:
+            logger.error(f"Bot is not a member of the force subscription channel. Status: {bot_member.status}")
+            logger.error("Please add the bot to the channel and make it an admin.")
+            
+    except Exception as e:
+        logger.error(f"Error verifying force subscription channel: {e}")
+        logger.error("Please check if FSUB_ID is correct and the bot is a member of that channel")
 
 @app.on_message(filters.command("start"))
 async def start_command(client: Client, message: Message):
@@ -139,6 +188,49 @@ async def start_command(client: Client, message: Message):
     else:
         await message.reply_text(final_msg, reply_markup=reply_markup)
 
+@app.on_message(filters.command("verify"))
+async def verify_membership_command(client: Client, message: Message):
+    if not message.from_user:
+        return
+        
+    user_id = message.from_user.id
+    
+    # Clear any cached status
+    if user_id in user_verification_cache:
+        del user_verification_cache[user_id]
+        
+    try:
+        is_member = await is_user_member(client, user_id)
+        
+        if is_member:
+            await message.reply_text("✅ ʏᴏᴜ ᴀʀᴇ ᴠᴇʀɪғɪᴇᴅ ᴀs ᴀ ᴄʜᴀɴɴᴇʟ ᴍᴇᴍʙᴇʀ. ʏᴏᴜ ᴄᴀɴ ɴᴏᴡ ᴜsᴇ ᴛʜᴇ ʙᴏᴛ.")
+            # Force cache update
+            user_verification_cache[user_id] = (time.time(), True)
+        else:
+            join_button = InlineKeyboardButton("ᴊᴏɪɴ ❤️☠️", url="https://t.me/Drxupdates")
+            reply_markup = InlineKeyboardMarkup([[join_button]])
+            await message.reply_text("ʏᴏᴜ ɴᴇᴇᴅ ᴛᴏ ᴊᴏɪɴ ᴛʜᴇ ᴄʜᴀɴɴᴇʟ ғɪʀsᴛ.", reply_markup=reply_markup)
+    except Exception as e:
+        logger.error(f"Error in verify command: {e}")
+        await message.reply_text("ᴜɴᴀʙʟᴇ ᴛᴏ ᴠᴇʀɪғʏ ᴍᴇᴍʙᴇʀsʜɪᴘ. ᴘʟᴇᴀsᴇ ᴛʀʏ ᴀɢᴀɪɴ ʟᴀᴛᴇʀ.")
+
+@app.on_message(filters.command("forceverify"))
+async def force_verify_command(client: Client, message: Message):
+    if not message.from_user:
+        return
+        
+    user_id = message.from_user.id
+    
+    # Only allow bot admin to use this command (you can modify the admin check)
+    try:
+        chat = await client.get_chat(message.chat.id)
+        if chat.type == "private":
+            # Force verify the user
+            user_verification_cache[user_id] = (time.time(), True)
+            await message.reply_text("✅ ʏᴏᴜ ʜᴀᴠᴇ ʙᴇᴇɴ ғᴏʀᴄᴇ ᴠᴇʀɪғɪᴇᴅ. ᴛʜɪs ɪs ᴀ ᴛᴇᴍᴘᴏʀᴀʀʏ ᴏᴠᴇʀʀɪᴅᴇ.")
+    except Exception as e:
+        logger.error(f"Error in forceverify command: {e}")
+
 async def update_status_message(status_message, text):
     try:
         await status_message.edit_text(text)
@@ -158,8 +250,13 @@ async def handle_message(client: Client, message: Message):
     # Check membership first and return early if not a member
     if not is_member:
         join_button = InlineKeyboardButton("ᴊᴏɪɴ ❤️☠️", url="https://t.me/Drxupdates")
-        reply_markup = InlineKeyboardMarkup([[join_button]])
-        await message.reply_text("ʏᴏᴜ ᴍᴜsᴛ ᴊᴏɪɴ ᴍʏ ᴄʜᴀɴɴᴇʟ ᴛᴏ ᴜsᴇ ᴍᴇ.", reply_markup=reply_markup)
+        verify_button = InlineKeyboardButton("ᴠᴇʀɪғʏ ✅", callback_data="verify_membership")
+        reply_markup = InlineKeyboardMarkup([[join_button], [verify_button]])
+        await message.reply_text(
+            "ʏᴏᴜ ᴍᴜsᴛ ᴊᴏɪɴ ᴍʏ ᴄʜᴀɴɴᴇʟ ᴛᴏ ᴜsᴇ ᴍᴇ.\n\n"
+            "ᴀғᴛᴇʀ ᴊᴏɪɴɪɴɢ, ᴄʟɪᴄᴋ ᴏɴ 'ᴠᴇʀɪғʏ' ᴏʀ ᴜsᴇ /verify ᴄᴏᴍᴍᴀɴᴅ.", 
+            reply_markup=reply_markup
+        )
         return
     
     # Only check URL validity if the user is a member
@@ -389,6 +486,32 @@ async def handle_message(client: Client, message: Message):
     except Exception as e:
         logger.error(f"Cleanup error: {e}")
 
+@app.on_callback_query(filters.regex("verify_membership"))
+async def verify_button_callback(client, callback_query):
+    user_id = callback_query.from_user.id
+    
+    # Clear any cached status
+    if user_id in user_verification_cache:
+        del user_verification_cache[user_id]
+    
+    is_member = await is_user_member(client, user_id)
+    
+    if is_member:
+        await callback_query.answer("✅ You are verified! You can now use the bot.")
+        await callback_query.message.edit_text("✅ ʏᴏᴜ ᴀʀᴇ ᴠᴇʀɪғɪᴇᴅ ᴀs ᴀ ᴄʜᴀɴɴᴇʟ ᴍᴇᴍʙᴇʀ. ʏᴏᴜ ᴄᴀɴ ɴᴏᴡ ᴜsᴇ ᴛʜᴇ ʙᴏᴛ.")
+        # Force cache update
+        user_verification_cache[user_id] = (time.time(), True)
+    else:
+        join_button = InlineKeyboardButton("ᴊᴏɪɴ ❤️☠️", url="https://t.me/Drxupdates")
+        verify_button = InlineKeyboardButton("ᴠᴇʀɪғʏ ᴀɢᴀɪɴ ✅", callback_data="verify_membership")
+        reply_markup = InlineKeyboardMarkup([[join_button], [verify_button]])
+        await callback_query.answer("❌ You need to join the channel first.")
+        await callback_query.message.edit_text(
+            "ʏᴏᴜ ᴍᴜsᴛ ᴊᴏɪɴ ᴍʏ ᴄʜᴀɴɴᴇʟ ᴛᴏ ᴜsᴇ ᴍᴇ.\n\n"
+            "ᴀғᴛᴇʀ ᴊᴏɪɴɪɴɢ, ᴄʟɪᴄᴋ ᴏɴ 'ᴠᴇʀɪғʏ ᴀɢᴀɪɴ'.", 
+            reply_markup=reply_markup
+        )
+
 flask_app = Flask(__name__)
 
 @flask_app.route('/')
@@ -411,6 +534,10 @@ def run_user():
     asyncio.set_event_loop(loop)
     loop.run_until_complete(start_user_client())
 
+async def startup_tasks():
+    await check_fsub_validity()
+    logger.info("Force subscription channel validation completed")
+
 if __name__ == "__main__":
     keep_alive()
 
@@ -418,7 +545,9 @@ if __name__ == "__main__":
         logger.info("Starting user client...")
         Thread(target=run_user).start()
 
+    # Run startup tasks
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(startup_tasks())
+
     logger.info("Starting bot client...")
     app.run()
-
-#esme FSUB_ID WALA SYSTEM REMOVE KROR
