@@ -67,7 +67,12 @@ if len(DUMP_CHAT_ID) == 0:
 else:
     DUMP_CHAT_ID = int(DUMP_CHAT_ID)
 
-# Removed FSUB_ID check and variable
+FSUB_ID = os.environ.get('FSUB_ID', '')
+if len(FSUB_ID) == 0:
+    logging.error("FSUB_ID variable is missing! Exiting now")
+    exit(1)
+else:
+    FSUB_ID = int(FSUB_ID)
 
 USER_SESSION_STRING = os.environ.get('USER_SESSION_STRING', '')
 if len(USER_SESSION_STRING) == 0:
@@ -90,7 +95,16 @@ VALID_DOMAINS = [
 ]
 last_update_time = 0
 
-# Removed is_user_member function since we don't need forced subscription anymore
+async def is_user_member(client, user_id):
+    try:
+        member = await client.get_chat_member(FSUB_ID, user_id)
+        if member.status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]:
+            return True
+        else:
+            return False
+    except Exception as e:
+        logging.error(f"Error checking membership status for user {user_id}: {e}")
+        return False
     
 def is_valid_url(url):
     parsed_url = urlparse(url)
@@ -139,10 +153,16 @@ async def handle_message(client: Client, message: Message):
         return
 
     user_id = message.from_user.id
+    is_member = await is_user_member(client, user_id)
+
+    # Check membership first and return early if not a member
+    if not is_member:
+        join_button = InlineKeyboardButton("ᴊᴏɪɴ ❤️☠️", url="https://t.me/Drxupdates")
+        reply_markup = InlineKeyboardMarkup([[join_button]])
+        await message.reply_text("ʏᴏᴜ ᴍᴜsᴛ ᴊᴏɪɴ ᴍʏ ᴄʜᴀɴɴᴇʟ ᴛᴏ ᴜsᴇ ᴍᴇ.", reply_markup=reply_markup)
+        return
     
-    # Removed forced subscription check
-    
-    # Check URL validity directly
+    # Only check URL validity if the user is a member
     url = None
     for word in message.text.split():
         if is_valid_url(word):
@@ -400,3 +420,5 @@ if __name__ == "__main__":
 
     logger.info("Starting bot client...")
     app.run()
+
+esme FSUB_ID WALA SYSTEM REMOVE KROR
